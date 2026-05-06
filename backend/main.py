@@ -159,6 +159,13 @@ def create_plan(data: PlanCreate, db: Session = Depends(get_db)):
         student_id=data.student_id, name=data.name,
         start_date=data.start_date, end_date=data.end_date, notes=data.notes,
         default_daily_hours=data.default_daily_hours,
+        weekday_hours=data.weekday_hours, weekend_hours=data.weekend_hours,
+        mon_hours=data.mon_hours, tue_hours=data.tue_hours, wed_hours=data.wed_hours,
+        thu_hours=data.thu_hours, fri_hours=data.fri_hours,
+        sat_hours=data.sat_hours, sun_hours=data.sun_hours,
+        mon_off=data.mon_off, tue_off=data.tue_off, wed_off=data.wed_off,
+        thu_off=data.thu_off, fri_off=data.fri_off,
+        sat_off=data.sat_off, sun_off=data.sun_off,
     )
     db.add(plan)
     db.flush()
@@ -200,6 +207,22 @@ def update_plan(plan_id: uuid.UUID, data: PlanCreate, db: Session = Depends(get_
     plan.end_date = data.end_date
     plan.notes = data.notes
     plan.default_daily_hours = data.default_daily_hours
+    plan.weekday_hours = data.weekday_hours
+    plan.weekend_hours = data.weekend_hours
+    plan.mon_hours = data.mon_hours
+    plan.tue_hours = data.tue_hours
+    plan.wed_hours = data.wed_hours
+    plan.thu_hours = data.thu_hours
+    plan.fri_hours = data.fri_hours
+    plan.sat_hours = data.sat_hours
+    plan.sun_hours = data.sun_hours
+    plan.mon_off = data.mon_off
+    plan.tue_off = data.tue_off
+    plan.wed_off = data.wed_off
+    plan.thu_off = data.thu_off
+    plan.fri_off = data.fri_off
+    plan.sat_off = data.sat_off
+    plan.sun_off = data.sun_off
     db.query(PlanSubject).filter(PlanSubject.plan_id == plan_id).delete()
     db.query(PlanDayEvent).filter(PlanDayEvent.plan_id == plan_id).delete()
     db.query(PlanDailySetting).filter(PlanDailySetting.plan_id == plan_id).delete()
@@ -299,7 +322,7 @@ def generate_plan(plan_id: uuid.UUID, db: Session = Depends(get_db)):
     # Clear existing generated entries
     db.query(PlanEntry).filter(PlanEntry.plan_id == plan_id).delete()
 
-    # Get off days from both day_events and daily_settings
+    # Get off days from day_events, daily_settings, and weekday off-day defaults
     off_days = set()
     day_events_map: dict[date, list[str]] = {}
     for ev in plan.day_events:
@@ -310,6 +333,13 @@ def generate_plan(plan_id: uuid.UUID, db: Session = Depends(get_db)):
     for ds in plan.daily_settings:
         if ds.is_off_day:
             off_days.add(ds.date)
+
+    # Weekday off-day defaults (0=Mon, 1=Tue, ..., 6=Sun)
+    weekday_off_flags = [
+        plan.mon_off or False, plan.tue_off or False, plan.wed_off or False,
+        plan.thu_off or False, plan.fri_off or False,
+        plan.sat_off or False, plan.sun_off or False,
+    ]
 
     # Build date range
     current = plan.start_date
@@ -337,6 +367,8 @@ def generate_plan(plan_id: uuid.UUID, db: Session = Depends(get_db)):
 
         for d in dates:
             if d in off_days:
+                continue
+            if weekday_off_flags[d.weekday()]:
                 continue
             if d.weekday() not in study_day_nums:
                 continue

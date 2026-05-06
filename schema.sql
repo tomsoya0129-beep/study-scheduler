@@ -39,6 +39,22 @@ CREATE TABLE IF NOT EXISTS plans (
   end_date DATE NOT NULL,
   notes TEXT,
   default_daily_hours DECIMAL(4,2) DEFAULT 5.0,
+  weekday_hours DECIMAL(4,2) DEFAULT 5.0,
+  weekend_hours DECIMAL(4,2) DEFAULT 5.0,
+  mon_hours DECIMAL(4,2),
+  tue_hours DECIMAL(4,2),
+  wed_hours DECIMAL(4,2),
+  thu_hours DECIMAL(4,2),
+  fri_hours DECIMAL(4,2),
+  sat_hours DECIMAL(4,2),
+  sun_hours DECIMAL(4,2),
+  mon_off BOOLEAN DEFAULT FALSE,
+  tue_off BOOLEAN DEFAULT FALSE,
+  wed_off BOOLEAN DEFAULT FALSE,
+  thu_off BOOLEAN DEFAULT FALSE,
+  fri_off BOOLEAN DEFAULT FALSE,
+  sat_off BOOLEAN DEFAULT FALSE,
+  sun_off BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

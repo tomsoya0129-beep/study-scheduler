@@ -58,16 +58,48 @@ export default function PlanDetailPage() {
     return plan.daily_settings?.find((ds) => ds.date === dateStr);
   };
 
+  const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+
+  const getWeekdayBudget = (dateStr: string): number => {
+    if (!plan) return 5.0;
+    const d = new Date(dateStr + "T00:00:00");
+    // JS: 0=Sun,1=Mon...6=Sat → convert to 0=Mon...6=Sun
+    const jsDay = d.getDay();
+    const dayIdx = jsDay === 0 ? 6 : jsDay - 1;
+    const dayKey = DAY_KEYS[dayIdx];
+
+    // Per-weekday override
+    const hoursKey = `${dayKey}_hours` as keyof Plan;
+    const perDayVal = plan[hoursKey];
+    if (perDayVal != null) return Number(perDayVal);
+
+    // Weekday/weekend base
+    const isWeekend = dayKey === "sat" || dayKey === "sun";
+    if (isWeekend) return Number(plan.weekend_hours ?? plan.default_daily_hours ?? 5.0);
+    return Number(plan.weekday_hours ?? plan.default_daily_hours ?? 5.0);
+  };
+
   const getDailyBudget = (dateStr: string): number => {
     const setting = getDailySettingForDate(dateStr);
     if (setting?.study_hours != null) return setting.study_hours;
-    return plan?.default_daily_hours ?? 5.0;
+    return getWeekdayBudget(dateStr);
+  };
+
+  const isWeekdayOff = (dateStr: string): boolean => {
+    if (!plan) return false;
+    const d = new Date(dateStr + "T00:00:00");
+    const jsDay = d.getDay();
+    const dayIdx = jsDay === 0 ? 6 : jsDay - 1;
+    const dayKey = DAY_KEYS[dayIdx];
+    const offKey = `${dayKey}_off` as keyof Plan;
+    return Boolean(plan[offKey]);
   };
 
   const isOffDay = (dateStr: string): boolean => {
     const setting = getDailySettingForDate(dateStr);
     if (setting?.is_off_day) return true;
-    return plan?.day_events?.some((ev) => ev.date === dateStr && ev.is_off_day) ?? false;
+    if (plan?.day_events?.some((ev) => ev.date === dateStr && ev.is_off_day)) return true;
+    return isWeekdayOff(dateStr);
   };
 
   const parseDurationToHours = (display: string | undefined): number => {

@@ -132,6 +132,22 @@ class PlanCreate(BaseModel):
     end_date: date
     notes: Optional[str] = None
     default_daily_hours: float = 5.0
+    weekday_hours: float = 5.0
+    weekend_hours: float = 5.0
+    mon_hours: Optional[float] = None
+    tue_hours: Optional[float] = None
+    wed_hours: Optional[float] = None
+    thu_hours: Optional[float] = None
+    fri_hours: Optional[float] = None
+    sat_hours: Optional[float] = None
+    sun_hours: Optional[float] = None
+    mon_off: bool = False
+    tue_off: bool = False
+    wed_off: bool = False
+    thu_off: bool = False
+    fri_off: bool = False
+    sat_off: bool = False
+    sun_off: bool = False
     subjects: list[PlanSubjectCreate] = []
     day_events: list[PlanDayEventCreate] = []
     daily_settings: list[PlanDailySettingCreate] = []
@@ -145,6 +161,22 @@ class PlanResponse(BaseModel):
     end_date: date
     notes: Optional[str]
     default_daily_hours: Optional[float] = 5.0
+    weekday_hours: Optional[float] = 5.0
+    weekend_hours: Optional[float] = 5.0
+    mon_hours: Optional[float] = None
+    tue_hours: Optional[float] = None
+    wed_hours: Optional[float] = None
+    thu_hours: Optional[float] = None
+    fri_hours: Optional[float] = None
+    sat_hours: Optional[float] = None
+    sun_hours: Optional[float] = None
+    mon_off: Optional[bool] = False
+    tue_off: Optional[bool] = False
+    wed_off: Optional[bool] = False
+    thu_off: Optional[bool] = False
+    fri_off: Optional[bool] = False
+    sat_off: Optional[bool] = False
+    sun_off: Optional[bool] = False
     subjects: list[PlanSubjectResponse] = []
     entries: list[PlanEntryResponse] = []
     day_events: list[PlanDayEventResponse] = []
