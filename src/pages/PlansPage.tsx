@@ -161,6 +161,15 @@ function PlanFormModal({ students, books, onClose, onSave }: PlanFormModalProps)
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(twoWeeksLater);
   const [notes, setNotes] = useState("");
+  const [weekdayHours, setWeekdayHours] = useState(5.0);
+  const [weekendHours, setWeekendHours] = useState(5.0);
+  const [perDayHours, setPerDayHours] = useState<Record<string, number | null>>({
+    mon: null, tue: null, wed: null, thu: null, fri: null, sat: null, sun: null,
+  });
+  const [perDayOff, setPerDayOff] = useState<Record<string, boolean>>({
+    mon: false, tue: false, wed: false, thu: false, fri: false, sat: false, sun: false,
+  });
+  const [showPerDay, setShowPerDay] = useState(false);
   const [subjects, setSubjects] = useState<PlanSubject[]>([]);
   const [dayEvents, setDayEvents] = useState<PlanDayEvent[]>([]);
   const [saving, setSaving] = useState(false);
@@ -228,8 +237,26 @@ function PlanFormModal({ students, books, onClose, onSave }: PlanFormModalProps)
       start_date: startDate,
       end_date: endDate,
       notes: notes.trim() || null,
+      default_daily_hours: weekdayHours,
+      weekday_hours: weekdayHours,
+      weekend_hours: weekendHours,
+      mon_hours: perDayHours.mon,
+      tue_hours: perDayHours.tue,
+      wed_hours: perDayHours.wed,
+      thu_hours: perDayHours.thu,
+      fri_hours: perDayHours.fri,
+      sat_hours: perDayHours.sat,
+      sun_hours: perDayHours.sun,
+      mon_off: perDayOff.mon,
+      tue_off: perDayOff.tue,
+      wed_off: perDayOff.wed,
+      thu_off: perDayOff.thu,
+      fri_off: perDayOff.fri,
+      sat_off: perDayOff.sat,
+      sun_off: perDayOff.sun,
       subjects: subjects.map((s, i) => ({ ...s, sort_order: i })),
       day_events: dayEvents,
+      daily_settings: [] as { date: string; study_hours: number; is_off_day: boolean }[],
     };
     const plan = await api.post<Plan>("/api/plans", data);
     // Auto-generate schedule
@@ -289,6 +316,95 @@ function PlanFormModal({ students, books, onClose, onSave }: PlanFormModalProps)
               onChange={(e) => setEndDate(e.target.value)}
             />
           </div>
+        </div>
+
+        {/* Weekday/Weekend study hours */}
+        <div style={{ background: "#f8fafc", borderRadius: "8px", padding: "0.8rem", marginBottom: "0.5rem" }}>
+          <h3 style={{ fontSize: "0.95rem", marginBottom: "0.5rem" }}>勉強時間設定</h3>
+          <div className="form-row">
+            <div className="form-group">
+              <label>平日（月〜金）</label>
+              <select
+                value={weekdayHours}
+                onChange={(e) => setWeekdayHours(parseFloat(e.target.value))}
+              >
+                {[1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 9, 10].map((h) => (
+                  <option key={h} value={h}>{h}時間</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>休日（土日）</label>
+              <select
+                value={weekendHours}
+                onChange={(e) => setWeekendHours(parseFloat(e.target.value))}
+              >
+                {[1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 9, 10].map((h) => (
+                  <option key={h} value={h}>{h}時間</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={() => setShowPerDay(!showPerDay)}
+            style={{ fontSize: "0.8rem" }}
+          >
+            {showPerDay ? "▲ 曜日ごとの設定を閉じる" : "▼ 曜日ごとに設定する"}
+          </button>
+          {showPerDay && (
+            <div style={{ marginTop: "0.5rem" }}>
+              <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginBottom: "0.3rem" }}>
+                個別に設定しない曜日は、平日・休日のベース時間が適用されます。
+              </p>
+              <table style={{ width: "100%", fontSize: "0.85rem" }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "center", padding: "0.3rem" }}>曜日</th>
+                    <th style={{ textAlign: "center", padding: "0.3rem" }}>勉強時間</th>
+                    <th style={{ textAlign: "center", padding: "0.3rem" }}>休日</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ALL_DAYS.map((day) => {
+                    const isWeekend = day === "sat" || day === "sun";
+                    const baseHours = isWeekend ? weekendHours : weekdayHours;
+                    return (
+                      <tr key={day} style={{ background: perDayOff[day] ? "#fef2f2" : "transparent" }}>
+                        <td style={{ textAlign: "center", padding: "0.3rem", fontWeight: 600 }}>
+                          {DAY_LABELS[day]}
+                        </td>
+                        <td style={{ textAlign: "center", padding: "0.3rem" }}>
+                          <select
+                            value={perDayHours[day] ?? ""}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPerDayHours({ ...perDayHours, [day]: val === "" ? null : parseFloat(val) });
+                            }}
+                            style={{ width: "6rem", fontSize: "0.8rem" }}
+                            disabled={perDayOff[day]}
+                          >
+                            <option value="">ベース ({baseHours}h)</option>
+                            {[1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 9, 10].map((h) => (
+                              <option key={h} value={h}>{h}時間</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td style={{ textAlign: "center", padding: "0.3rem" }}>
+                          <input
+                            type="checkbox"
+                            checked={perDayOff[day]}
+                            onChange={(e) => setPerDayOff({ ...perDayOff, [day]: e.target.checked })}
+                            style={{ width: "auto" }}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Subjects */}

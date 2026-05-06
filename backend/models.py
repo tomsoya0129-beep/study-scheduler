@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, date
-from sqlalchemy import Column, String, Integer, Text, Date, DateTime, Boolean, DECIMAL, ARRAY, ForeignKey
+from sqlalchemy import Column, String, Integer, Text, Date, DateTime, Boolean, DECIMAL, ARRAY, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from database import Base
@@ -46,10 +46,28 @@ class Plan(Base):
     start_date = Column(Date, nullable=False)
     end_date = Column(Date, nullable=False)
     notes = Column(Text)
+    default_daily_hours = Column(DECIMAL(4, 2), default=5.0)
+    weekday_hours = Column(DECIMAL(4, 2), default=5.0)
+    weekend_hours = Column(DECIMAL(4, 2), default=5.0)
+    mon_hours = Column(DECIMAL(4, 2))
+    tue_hours = Column(DECIMAL(4, 2))
+    wed_hours = Column(DECIMAL(4, 2))
+    thu_hours = Column(DECIMAL(4, 2))
+    fri_hours = Column(DECIMAL(4, 2))
+    sat_hours = Column(DECIMAL(4, 2))
+    sun_hours = Column(DECIMAL(4, 2))
+    mon_off = Column(Boolean, default=False)
+    tue_off = Column(Boolean, default=False)
+    wed_off = Column(Boolean, default=False)
+    thu_off = Column(Boolean, default=False)
+    fri_off = Column(Boolean, default=False)
+    sat_off = Column(Boolean, default=False)
+    sun_off = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     subjects = relationship("PlanSubject", back_populates="plan", cascade="all, delete-orphan", order_by="PlanSubject.sort_order")
     entries = relationship("PlanEntry", back_populates="plan", cascade="all, delete-orphan")
     day_events = relationship("PlanDayEvent", back_populates="plan", cascade="all, delete-orphan")
+    daily_settings = relationship("PlanDailySetting", back_populates="plan", cascade="all, delete-orphan")
     student = relationship("Student")
 
 
@@ -82,6 +100,17 @@ class PlanDayEvent(Base):
     content = Column(Text, nullable=False)
     is_off_day = Column(Boolean, default=False)
     plan = relationship("Plan", back_populates="day_events")
+
+
+class PlanDailySetting(Base):
+    __tablename__ = "plan_daily_settings"
+    __table_args__ = (UniqueConstraint('plan_id', 'date'),)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("plans.id", ondelete="CASCADE"), nullable=False)
+    date = Column(Date, nullable=False)
+    study_hours = Column(DECIMAL(4, 2))
+    is_off_day = Column(Boolean, default=False)
+    plan = relationship("Plan", back_populates="daily_settings")
 
 
 class PlanEntry(Base):

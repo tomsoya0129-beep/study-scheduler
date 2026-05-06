@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import type { Plan, PlanEntry } from "../types";
+import type { Plan, PlanEntry, PlanDailySetting } from "../types";
 
 const DAY_NAMES = ["日", "月", "火", "水", "木", "金", "土"];
 
@@ -18,6 +18,13 @@ export default function PlanDetailPage() {
   const [newEntryDuration, setNewEntryDuration] = useState("");
   const [newEntryDetail, setNewEntryDetail] = useState("");
   const [newEntryType, setNewEntryType] = useState("test");
+  const [editingBudget, setEditingBudget] = useState<string | null>(null);
+  const [budgetValue, setBudgetValue] = useState("");
+  const [editingEntry, setEditingEntry] = useState<string | null>(null);
+  const [editEntryContent, setEditEntryContent] = useState("");
+  const [editEntryBookName, setEditEntryBookName] = useState("");
+  const [editEntryDuration, setEditEntryDuration] = useState("");
+  const [editEntryDetail, setEditEntryDetail] = useState("");
 
   const loadPlan = useCallback(async () => {
     if (!planId) return;
@@ -51,6 +58,101 @@ export default function PlanDetailPage() {
       .sort((a, b) => a.sort_order - b.sort_order);
   };
 
+  const getDailySettingForDate = (dateStr: string): PlanDailySetting | undefined => {
+    if (!plan) return undefined;
+    return plan.daily_settings?.find((ds) => ds.date === dateStr);
+  };
+
+  const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+
+  const getWeekdayBudget = (dateStr: string): number => {
+    if (!plan) return 5.0;
+    const d = new Date(dateStr + "T00:00:00");
+    // JS: 0=Sun,1=Mon...6=Sat → convert to 0=Mon...6=Sun
+    const jsDay = d.getDay();
+    const dayIdx = jsDay === 0 ? 6 : jsDay - 1;
+    const dayKey = DAY_KEYS[dayIdx];
+
+    // Per-weekday override
+    const hoursKey = `${dayKey}_hours` as keyof Plan;
+    const perDayVal = plan[hoursKey];
+    if (perDayVal != null) return Number(perDayVal);
+
+    // Weekday/weekend base
+    const isWeekend = dayKey === "sat" || dayKey === "sun";
+    if (isWeekend) return Number(plan.weekend_hours ?? plan.default_daily_hours ?? 5.0);
+    return Number(plan.weekday_hours ?? plan.default_daily_hours ?? 5.0);
+  };
+
+  const getDailyBudget = (dateStr: string): number => {
+    const setting = getDailySettingForDate(dateStr);
+    if (setting?.study_hours != null) return setting.study_hours;
+    return getWeekdayBudget(dateStr);
+  };
+
+  const isWeekdayOff = (dateStr: string): boolean => {
+    if (!plan) return false;
+    const d = new Date(dateStr + "T00:00:00");
+    const jsDay = d.getDay();
+    const dayIdx = jsDay === 0 ? 6 : jsDay - 1;
+    const dayKey = DAY_KEYS[dayIdx];
+    const offKey = `${dayKey}_off` as keyof Plan;
+    return Boolean(plan[offKey]);
+  };
+
+  const isOffDay = (dateStr: string): boolean => {
+    const setting = getDailySettingForDate(dateStr);
+    if (setting?.is_off_day) return true;
+    if (plan?.day_events?.some((ev) => ev.date === dateStr && ev.is_off_day)) return true;
+    return isWeekdayOff(dateStr);
+  };
+
+  const parseDurationToHours = (display: string | undefined): number => {
+    if (!display) return 0;
+    if (display.endsWith("h")) return parseFloat(display) || 0;
+    if (display.includes("分")) {
+      const mins = parseInt(display) || 0;
+      return mins / 60;
+    }
+    return parseFloat(display) || 0;
+  };
+
+  const getUsedHours = (dateStr: string): number => {
+    const entries = getEntriesForDate(dateStr);
+    return entries.reduce((sum, e) => sum + parseDurationToHours(e.duration_display), 0);
+  };
+
+  const getRemainingHours = (dateStr: string): number => {
+    return getDailyBudget(dateStr) - getUsedHours(dateStr);
+  };
+
+  const updateDailySetting = async (dateStr: string, studyHours: number | null, offDay: boolean) => {
+    if (!planId) return;
+    await api.put(`/api/plans/${planId}/daily-settings/${dateStr}`, {
+      date: dateStr,
+      study_hours: studyHours,
+      is_off_day: offDay,
+    });
+    loadPlan();
+  };
+
+  const toggleOffDay = async (dateStr: string) => {
+    if (!planId) return;
+    await api.post(`/api/plans/${planId}/toggle-off-day/${dateStr}`, {});
+    loadPlan();
+    const currentOff = isOffDay(dateStr);
+    showToast(currentOff ? "勉強日に変更" : "休日に設定（教科を翌日に繰り越し）");
+  };
+
+  const saveBudget = async (dateStr: string) => {
+    const hours = parseFloat(budgetValue);
+    if (isNaN(hours) || hours < 0) return;
+    const currentOff = isOffDay(dateStr);
+    await updateDailySetting(dateStr, hours, currentOff);
+    setEditingBudget(null);
+    showToast("勉強時間を更新");
+  };
+
   const getDatesGroupedByWeek = (): string[][] => {
     if (!plan) return [];
     const start = new Date(plan.start_date + "T00:00:00");
@@ -66,7 +168,7 @@ export default function PlanDetailPage() {
     while (current <= end || weeks.length === 0) {
       const week: string[] = [];
       for (let d = 0; d < 7; d++) {
-        const dateStr = current.toISOString().split("T")[0];
+        const dateStr = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
         if (current >= start && current <= end) {
           week.push(dateStr);
         } else {
@@ -160,6 +262,30 @@ export default function PlanDetailPage() {
     loadPlan();
   };
 
+  const startEditEntry = (entry: PlanEntry) => {
+    setEditingEntry(entry.id);
+    setEditEntryContent(entry.content);
+    setEditEntryBookName(entry.book_name || "");
+    setEditEntryDuration(entry.duration_display || "");
+    setEditEntryDetail(entry.detail || "");
+  };
+
+  const saveEditEntry = async (entry: PlanEntry) => {
+    if (!planId || !editEntryContent.trim()) return;
+    await api.put(`/api/plans/${planId}/entries/${entry.id}`, {
+      date: entry.date,
+      entry_type: entry.entry_type,
+      book_name: editEntryBookName.trim() || null,
+      duration_display: editEntryDuration.trim() || null,
+      content: editEntryContent.trim(),
+      detail: editEntryDetail.trim() || null,
+      sort_order: entry.sort_order,
+    });
+    setEditingEntry(null);
+    loadPlan();
+    showToast("エントリを更新しました");
+  };
+
   if (loading) return <div className="empty-state">読み込み中...</div>;
   if (!plan) return <div className="empty-state">計画が見つかりません</div>;
 
@@ -236,14 +362,18 @@ export default function PlanDetailPage() {
                   const d = new Date(dateStr + "T00:00:00");
                   const entries = getEntriesForDate(dateStr);
                   const isWeekend = di >= 5;
+                  const offDay = isOffDay(dateStr);
+                  const budget = getDailyBudget(dateStr);
+                  const remaining = getRemainingHours(dateStr);
 
                   return (
                     <td
                       key={di}
                       className="schedule-day-cell"
                       style={{
-                        background: isWeekend ? "#f0f7ff" : "white",
+                        background: offDay ? "#fef2f2" : isWeekend ? "#f0f7ff" : "white",
                         verticalAlign: "top",
+                        opacity: offDay ? 0.7 : 1,
                       }}
                     >
                       <div className="day-date">
@@ -256,58 +386,220 @@ export default function PlanDetailPage() {
                         >
                           {copiedDay === dateStr ? "済" : "コピー"}
                         </button>
+                        <button
+                          className={`btn btn-sm ${offDay ? "btn-danger" : "btn-outline"}`}
+                          onClick={() => toggleOffDay(dateStr)}
+                          style={{ marginLeft: "0.2rem", fontSize: "0.6rem", padding: "0 0.2rem" }}
+                          title={offDay ? "勉強日に戻す" : "休日にする"}
+                        >
+                          {offDay ? "休" : "休日"}
+                        </button>
                       </div>
+
+                      {!offDay && (
+                        <div
+                          className="day-budget"
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            fontSize: "0.65rem",
+                            padding: "0.15rem 0.3rem",
+                            background: remaining < 0 ? "#fef2f2" : remaining === 0 ? "#f0fdf4" : "#eff6ff",
+                            borderRadius: "4px",
+                            marginBottom: "0.3rem",
+                            gap: "0.2rem",
+                          }}
+                        >
+                          {editingBudget === dateStr ? (
+                            <div style={{ display: "flex", gap: "0.2rem", width: "100%" }}>
+                              <input
+                                type="number"
+                                value={budgetValue}
+                                onChange={(e) => setBudgetValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") saveBudget(dateStr);
+                                  if (e.key === "Escape") setEditingBudget(null);
+                                }}
+                                style={{ width: "3rem", fontSize: "0.65rem", padding: "0.1rem" }}
+                                step="0.5"
+                                min="0"
+                                autoFocus
+                              />
+                              <button
+                                className="btn btn-primary btn-sm"
+                                onClick={() => saveBudget(dateStr)}
+                                style={{ fontSize: "0.55rem", padding: "0 0.2rem" }}
+                              >
+                                OK
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <span
+                                onClick={() => {
+                                  setEditingBudget(dateStr);
+                                  setBudgetValue(String(budget));
+                                }}
+                                style={{ cursor: "pointer", textDecoration: "underline dotted" }}
+                                title="クリックで勉強時間を変更"
+                              >
+                                {budget}h
+                              </span>
+                              <span style={{
+                                fontWeight: 600,
+                                color: remaining < 0 ? "var(--danger)" : remaining === 0 ? "#16a34a" : "var(--primary)",
+                              }}>
+                                残{remaining.toFixed(1)}h
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {offDay && (
+                        <div style={{
+                          textAlign: "center",
+                          fontSize: "0.75rem",
+                          color: "var(--danger)",
+                          fontWeight: 600,
+                          padding: "0.5rem 0",
+                        }}>
+                          休日
+                        </div>
+                      )}
 
                       {entries.map((entry) => (
                         <div
                           key={entry.id}
                           className={`schedule-entry ${entry.entry_type}`}
-                          style={{ position: "relative" }}
+                          style={{ position: "relative", cursor: "pointer" }}
+                          onDoubleClick={() => startEditEntry(entry)}
                         >
-                          {entry.entry_type === "event" ? (
-                            <div className="entry-title">{entry.content}</div>
+                          {editingEntry === entry.id ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
+                              {entry.entry_type !== "event" && (
+                                <>
+                                  <input
+                                    value={editEntryBookName}
+                                    onChange={(e) => setEditEntryBookName(e.target.value)}
+                                    placeholder="参考書名"
+                                    style={{ fontSize: "0.7rem", padding: "0.15rem" }}
+                                  />
+                                  <input
+                                    value={editEntryDuration}
+                                    onChange={(e) => setEditEntryDuration(e.target.value)}
+                                    placeholder="時間 (例: 1.0h)"
+                                    style={{ fontSize: "0.7rem", padding: "0.15rem" }}
+                                  />
+                                </>
+                              )}
+                              <input
+                                value={editEntryContent}
+                                onChange={(e) => setEditEntryContent(e.target.value)}
+                                placeholder="内容"
+                                style={{ fontSize: "0.7rem", padding: "0.15rem" }}
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") saveEditEntry(entry);
+                                  if (e.key === "Escape") setEditingEntry(null);
+                                }}
+                              />
+                              {entry.entry_type !== "event" && (
+                                <input
+                                  value={editEntryDetail}
+                                  onChange={(e) => setEditEntryDetail(e.target.value)}
+                                  placeholder="詳細"
+                                  style={{ fontSize: "0.7rem", padding: "0.15rem" }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") saveEditEntry(entry);
+                                    if (e.key === "Escape") setEditingEntry(null);
+                                  }}
+                                />
+                              )}
+                              <div style={{ display: "flex", gap: "0.2rem" }}>
+                                <button
+                                  className="btn btn-primary btn-sm"
+                                  onClick={() => saveEditEntry(entry)}
+                                  style={{ fontSize: "0.55rem", padding: "0.1rem 0.3rem" }}
+                                >
+                                  保存
+                                </button>
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  onClick={() => setEditingEntry(null)}
+                                  style={{ fontSize: "0.55rem", padding: "0.1rem 0.3rem" }}
+                                >
+                                  取消
+                                </button>
+                              </div>
+                            </div>
                           ) : (
                             <>
-                              {entry.book_name && (
-                                <div className="entry-title">
-                                  {entry.book_name}{" "}
-                                  {entry.duration_display && (
-                                    <span style={{ fontWeight: 400 }}>
-                                      {entry.duration_display}
-                                    </span>
+                              {entry.entry_type === "event" ? (
+                                <div className="entry-title">{entry.content}</div>
+                              ) : (
+                                <>
+                                  {entry.book_name && (
+                                    <div className="entry-title">
+                                      {entry.book_name}{" "}
+                                      {entry.duration_display && (
+                                        <span style={{ fontWeight: 400 }}>
+                                          {entry.duration_display}
+                                        </span>
+                                      )}
+                                    </div>
                                   )}
-                                </div>
+                                  <div
+                                    className={
+                                      entry.entry_type === "review"
+                                        ? "entry-title"
+                                        : "entry-detail"
+                                    }
+                                  >
+                                    {entry.content}
+                                  </div>
+                                  {entry.detail && (
+                                    <div className="entry-detail">{entry.detail}</div>
+                                  )}
+                                </>
                               )}
-                              <div
-                                className={
-                                  entry.entry_type === "review"
-                                    ? "entry-title"
-                                    : "entry-detail"
-                                }
-                              >
-                                {entry.content}
+                              <div style={{
+                                position: "absolute",
+                                top: 0,
+                                right: 0,
+                                display: "flex",
+                                gap: "0.1rem",
+                              }}>
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  onClick={(e) => { e.stopPropagation(); startEditEntry(entry); }}
+                                  style={{
+                                    fontSize: "0.55rem",
+                                    padding: "0 0.15rem",
+                                    opacity: 0.5,
+                                    lineHeight: 1,
+                                  }}
+                                  title="編集"
+                                >
+                                  ✎
+                                </button>
+                                <button
+                                  className="btn btn-danger btn-sm"
+                                  onClick={() => deleteEntry(entry.id)}
+                                  style={{
+                                    fontSize: "0.6rem",
+                                    padding: "0 0.2rem",
+                                    opacity: 0.5,
+                                    lineHeight: 1,
+                                  }}
+                                  title="削除"
+                                >
+                                  ×
+                                </button>
                               </div>
-                              {entry.detail && (
-                                <div className="entry-detail">{entry.detail}</div>
-                              )}
                             </>
                           )}
-                          <button
-                            className="btn btn-danger btn-sm"
-                            onClick={() => deleteEntry(entry.id)}
-                            style={{
-                              position: "absolute",
-                              top: 0,
-                              right: 0,
-                              fontSize: "0.6rem",
-                              padding: "0 0.2rem",
-                              opacity: 0.5,
-                              lineHeight: 1,
-                            }}
-                            title="削除"
-                          >
-                            ×
-                          </button>
                         </div>
                       ))}
 

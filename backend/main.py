@@ -8,12 +8,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from database import get_db
-from models import Book, BookUnit, Student, Plan, PlanSubject, PlanDayEvent, PlanEntry
+from models import Book, BookUnit, Student, Plan, PlanSubject, PlanDayEvent, PlanDailySetting, PlanEntry
 from schemas import (
     BookCreate, BookResponse, BookUnitCreate,
     StudentCreate, StudentResponse,
     PlanCreate, PlanResponse, PlanSubjectCreate,
-    PlanDayEventCreate, PlanEntryCreate, PlanEntryResponse,
+    PlanDayEventCreate, PlanDailySettingCreate, PlanDailySettingResponse,
+    PlanEntryCreate, PlanEntryResponse,
     GeneratePlanRequest,
 )
 
@@ -54,7 +55,7 @@ def create_book(data: BookCreate, db: Session = Depends(get_db)):
         unit = BookUnit(
             book_id=book.id, label=u.label, title=u.title,
             start_page=u.start_page, end_page=u.end_page,
-            sort_order=u.sort_order if u.sort_order else i,
+            sort_order=u.sort_order if u.sort_order is not None else i,
             parent_label=u.parent_label,
         )
         db.add(unit)
@@ -76,7 +77,7 @@ def update_book(book_id: uuid.UUID, data: BookCreate, db: Session = Depends(get_
         unit = BookUnit(
             book_id=book.id, label=u.label, title=u.title,
             start_page=u.start_page, end_page=u.end_page,
-            sort_order=u.sort_order if u.sort_order else i,
+            sort_order=u.sort_order if u.sort_order is not None else i,
             parent_label=u.parent_label,
         )
         db.add(unit)
@@ -157,6 +158,14 @@ def create_plan(data: PlanCreate, db: Session = Depends(get_db)):
     plan = Plan(
         student_id=data.student_id, name=data.name,
         start_date=data.start_date, end_date=data.end_date, notes=data.notes,
+        default_daily_hours=data.default_daily_hours,
+        weekday_hours=data.weekday_hours, weekend_hours=data.weekend_hours,
+        mon_hours=data.mon_hours, tue_hours=data.tue_hours, wed_hours=data.wed_hours,
+        thu_hours=data.thu_hours, fri_hours=data.fri_hours,
+        sat_hours=data.sat_hours, sun_hours=data.sun_hours,
+        mon_off=data.mon_off, tue_off=data.tue_off, wed_off=data.wed_off,
+        thu_off=data.thu_off, fri_off=data.fri_off,
+        sat_off=data.sat_off, sun_off=data.sun_off,
     )
     db.add(plan)
     db.flush()
@@ -176,6 +185,12 @@ def create_plan(data: PlanCreate, db: Session = Depends(get_db)):
             content=ev.content, is_off_day=ev.is_off_day,
         )
         db.add(event)
+    for ds in data.daily_settings:
+        setting = PlanDailySetting(
+            plan_id=plan.id, date=ds.date,
+            study_hours=ds.study_hours, is_off_day=ds.is_off_day,
+        )
+        db.add(setting)
     db.commit()
     db.refresh(plan)
     return plan
@@ -191,8 +206,26 @@ def update_plan(plan_id: uuid.UUID, data: PlanCreate, db: Session = Depends(get_
     plan.start_date = data.start_date
     plan.end_date = data.end_date
     plan.notes = data.notes
+    plan.default_daily_hours = data.default_daily_hours
+    plan.weekday_hours = data.weekday_hours
+    plan.weekend_hours = data.weekend_hours
+    plan.mon_hours = data.mon_hours
+    plan.tue_hours = data.tue_hours
+    plan.wed_hours = data.wed_hours
+    plan.thu_hours = data.thu_hours
+    plan.fri_hours = data.fri_hours
+    plan.sat_hours = data.sat_hours
+    plan.sun_hours = data.sun_hours
+    plan.mon_off = data.mon_off
+    plan.tue_off = data.tue_off
+    plan.wed_off = data.wed_off
+    plan.thu_off = data.thu_off
+    plan.fri_off = data.fri_off
+    plan.sat_off = data.sat_off
+    plan.sun_off = data.sun_off
     db.query(PlanSubject).filter(PlanSubject.plan_id == plan_id).delete()
     db.query(PlanDayEvent).filter(PlanDayEvent.plan_id == plan_id).delete()
+    db.query(PlanDailySetting).filter(PlanDailySetting.plan_id == plan_id).delete()
     for i, s in enumerate(data.subjects):
         subj = PlanSubject(
             plan_id=plan.id, book_id=s.book_id, display_name=s.display_name,
@@ -209,6 +242,12 @@ def update_plan(plan_id: uuid.UUID, data: PlanCreate, db: Session = Depends(get_
             content=ev.content, is_off_day=ev.is_off_day,
         )
         db.add(event)
+    for ds in data.daily_settings:
+        setting = PlanDailySetting(
+            plan_id=plan.id, date=ds.date,
+            study_hours=ds.study_hours, is_off_day=ds.is_off_day,
+        )
+        db.add(setting)
     db.commit()
     db.refresh(plan)
     return plan
@@ -235,6 +274,23 @@ def add_plan_entry(plan_id: uuid.UUID, data: PlanEntryCreate, db: Session = Depe
     return entry
 
 
+@app.put("/api/plans/{plan_id}/entries/{entry_id}", response_model=PlanEntryResponse)
+def update_plan_entry(plan_id: uuid.UUID, entry_id: uuid.UUID, data: PlanEntryCreate, db: Session = Depends(get_db)):
+    entry = db.query(PlanEntry).filter(PlanEntry.id == entry_id, PlanEntry.plan_id == plan_id).first()
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    entry.date = data.date
+    entry.entry_type = data.entry_type
+    entry.book_name = data.book_name
+    entry.duration_display = data.duration_display
+    entry.content = data.content
+    entry.detail = data.detail
+    entry.sort_order = data.sort_order
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
 @app.delete("/api/plans/{plan_id}/entries/{entry_id}")
 def delete_plan_entry(plan_id: uuid.UUID, entry_id: uuid.UUID, db: Session = Depends(get_db)):
     entry = db.query(PlanEntry).filter(PlanEntry.id == entry_id, PlanEntry.plan_id == plan_id).first()
@@ -243,6 +299,115 @@ def delete_plan_entry(plan_id: uuid.UUID, entry_id: uuid.UUID, db: Session = Dep
     db.delete(entry)
     db.commit()
     return {"ok": True}
+
+
+# ── Toggle Off-Day with Entry Shifting ──
+
+@app.post("/api/plans/{plan_id}/toggle-off-day/{date_str}")
+def toggle_off_day_with_shift(plan_id: uuid.UUID, date_str: str, db: Session = Depends(get_db)):
+    plan = db.query(Plan).filter(Plan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(404, "Plan not found")
+
+    target_date = date.fromisoformat(date_str)
+
+    # Check current off-day status
+    setting = db.query(PlanDailySetting).filter(
+        PlanDailySetting.plan_id == plan_id,
+        PlanDailySetting.date == target_date,
+    ).first()
+
+    currently_off = False
+    if setting and setting.is_off_day:
+        currently_off = True
+
+    if not currently_off:
+        # Setting to off: shift entries to next available day
+        entries = db.query(PlanEntry).filter(
+            PlanEntry.plan_id == plan_id,
+            PlanEntry.date == target_date,
+            PlanEntry.entry_type != "event",
+        ).all()
+
+        if entries:
+            # Collect all off days
+            off_dates = set()
+            for ds in plan.daily_settings:
+                if ds.is_off_day:
+                    off_dates.add(ds.date)
+            for ev in plan.day_events:
+                if ev.is_off_day:
+                    off_dates.add(ev.date)
+
+            weekday_off_flags = [
+                plan.mon_off or False, plan.tue_off or False, plan.wed_off or False,
+                plan.thu_off or False, plan.fri_off or False,
+                plan.sat_off or False, plan.sun_off or False,
+            ]
+
+            # Find next available day
+            next_day = target_date + timedelta(days=1)
+            while next_day <= plan.end_date:
+                if next_day not in off_dates and not weekday_off_flags[next_day.weekday()]:
+                    break
+                next_day += timedelta(days=1)
+
+            if next_day <= plan.end_date:
+                # Get max sort_order on target day
+                existing_on_next = db.query(PlanEntry).filter(
+                    PlanEntry.plan_id == plan_id,
+                    PlanEntry.date == next_day,
+                ).all()
+                max_sort = max((e.sort_order for e in existing_on_next), default=-1)
+
+                for i, entry in enumerate(entries):
+                    entry.date = next_day
+                    entry.sort_order = max_sort + 1 + i
+
+        # Toggle on
+        if setting:
+            setting.is_off_day = True
+        else:
+            setting = PlanDailySetting(
+                plan_id=plan_id, date=target_date,
+                study_hours=None, is_off_day=True,
+            )
+            db.add(setting)
+    else:
+        # Toggle off
+        if setting:
+            setting.is_off_day = False
+
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+
+# ── Daily Settings (per-day budget & off-day) ──
+
+@app.put("/api/plans/{plan_id}/daily-settings/{date_str}", response_model=PlanDailySettingResponse)
+def upsert_daily_setting(plan_id: uuid.UUID, date_str: str, data: PlanDailySettingCreate, db: Session = Depends(get_db)):
+    plan = db.query(Plan).filter(Plan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(404, "Plan not found")
+    existing = db.query(PlanDailySetting).filter(
+        PlanDailySetting.plan_id == plan_id,
+        PlanDailySetting.date == data.date,
+    ).first()
+    if existing:
+        existing.study_hours = data.study_hours
+        existing.is_off_day = data.is_off_day
+        db.commit()
+        db.refresh(existing)
+        return existing
+    setting = PlanDailySetting(
+        plan_id=plan_id, date=data.date,
+        study_hours=data.study_hours, is_off_day=data.is_off_day,
+    )
+    db.add(setting)
+    db.commit()
+    db.refresh(setting)
+    return setting
 
 
 # ── Generate Schedule ──
@@ -256,7 +421,7 @@ def generate_plan(plan_id: uuid.UUID, db: Session = Depends(get_db)):
     # Clear existing generated entries
     db.query(PlanEntry).filter(PlanEntry.plan_id == plan_id).delete()
 
-    # Get off days and events
+    # Get off days from day_events, daily_settings, and weekday off-day defaults
     off_days = set()
     day_events_map: dict[date, list[str]] = {}
     for ev in plan.day_events:
@@ -264,6 +429,16 @@ def generate_plan(plan_id: uuid.UUID, db: Session = Depends(get_db)):
             off_days.add(ev.date)
         if ev.content:
             day_events_map.setdefault(ev.date, []).append(ev.content)
+    for ds in plan.daily_settings:
+        if ds.is_off_day:
+            off_days.add(ds.date)
+
+    # Weekday off-day defaults (0=Mon, 1=Tue, ..., 6=Sun)
+    weekday_off_flags = [
+        plan.mon_off or False, plan.tue_off or False, plan.wed_off or False,
+        plan.thu_off or False, plan.fri_off or False,
+        plan.sat_off or False, plan.sun_off or False,
+    ]
 
     # Build date range
     current = plan.start_date
@@ -291,6 +466,8 @@ def generate_plan(plan_id: uuid.UUID, db: Session = Depends(get_db)):
 
         for d in dates:
             if d in off_days:
+                continue
+            if weekday_off_flags[d.weekday()]:
                 continue
             if d.weekday() not in study_day_nums:
                 continue
@@ -347,6 +524,9 @@ def generate_plan(plan_id: uuid.UUID, db: Session = Depends(get_db)):
 
             units_studied += 1
 
+            if unit_idx >= len(units) and subj.on_completion != "repeat":
+                break
+
     # Add day events as entries
     for d, events in day_events_map.items():
         for ev_content in events:
@@ -377,7 +557,7 @@ if STATIC_DIR.exists():
 
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
-        file_path = STATIC_DIR / full_path
-        if file_path.exists() and file_path.is_file():
+        file_path = (STATIC_DIR / full_path).resolve()
+        if file_path.is_relative_to(STATIC_DIR) and file_path.exists() and file_path.is_file():
             return FileResponse(str(file_path))
         return FileResponse(str(STATIC_DIR / "index.html"))

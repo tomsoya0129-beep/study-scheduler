@@ -38,7 +38,34 @@ CREATE TABLE IF NOT EXISTS plans (
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
   notes TEXT,
+  default_daily_hours DECIMAL(4,2) DEFAULT 5.0,
+  weekday_hours DECIMAL(4,2) DEFAULT 5.0,
+  weekend_hours DECIMAL(4,2) DEFAULT 5.0,
+  mon_hours DECIMAL(4,2),
+  tue_hours DECIMAL(4,2),
+  wed_hours DECIMAL(4,2),
+  thu_hours DECIMAL(4,2),
+  fri_hours DECIMAL(4,2),
+  sat_hours DECIMAL(4,2),
+  sun_hours DECIMAL(4,2),
+  mon_off BOOLEAN DEFAULT FALSE,
+  tue_off BOOLEAN DEFAULT FALSE,
+  wed_off BOOLEAN DEFAULT FALSE,
+  thu_off BOOLEAN DEFAULT FALSE,
+  fri_off BOOLEAN DEFAULT FALSE,
+  sat_off BOOLEAN DEFAULT FALSE,
+  sun_off BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Plan daily settings (per-day study budget and off-day overrides)
+CREATE TABLE IF NOT EXISTS plan_daily_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  plan_id UUID NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  date DATE NOT NULL,
+  study_hours DECIMAL(4,2),
+  is_off_day BOOLEAN DEFAULT FALSE,
+  UNIQUE(plan_id, date)
 );
 
 -- Plan subject configurations
@@ -90,6 +117,7 @@ ALTER TABLE plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plan_subjects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plan_day_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plan_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE plan_daily_settings ENABLE ROW LEVEL SECURITY;
 
 -- Create policies allowing all operations (single user app)
 CREATE POLICY "Allow all on books" ON books FOR ALL USING (true) WITH CHECK (true);
@@ -99,3 +127,4 @@ CREATE POLICY "Allow all on plans" ON plans FOR ALL USING (true) WITH CHECK (tru
 CREATE POLICY "Allow all on plan_subjects" ON plan_subjects FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on plan_day_events" ON plan_day_events FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on plan_entries" ON plan_entries FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on plan_daily_settings" ON plan_daily_settings FOR ALL USING (true) WITH CHECK (true);
