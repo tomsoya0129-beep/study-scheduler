@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import type { Plan, PlanEntry } from "../types";
+import type { Plan, PlanEntry, PlanDailySetting } from "../types";
 
 const DAY_NAMES = ["日", "月", "火", "水", "木", "金", "土"];
 
@@ -18,6 +18,8 @@ export default function PlanDetailPage() {
   const [newEntryDuration, setNewEntryDuration] = useState("");
   const [newEntryDetail, setNewEntryDetail] = useState("");
   const [newEntryType, setNewEntryType] = useState("test");
+  const [editingBudget, setEditingBudget] = useState<string | null>(null);
+  const [budgetValue, setBudgetValue] = useState("");
 
   const loadPlan = useCallback(async () => {
     if (!planId) return;
@@ -49,6 +51,68 @@ export default function PlanDetailPage() {
     return plan.entries
       .filter((e) => e.date === dateStr)
       .sort((a, b) => a.sort_order - b.sort_order);
+  };
+
+  const getDailySettingForDate = (dateStr: string): PlanDailySetting | undefined => {
+    if (!plan) return undefined;
+    return plan.daily_settings?.find((ds) => ds.date === dateStr);
+  };
+
+  const getDailyBudget = (dateStr: string): number => {
+    const setting = getDailySettingForDate(dateStr);
+    if (setting?.study_hours != null) return setting.study_hours;
+    return plan?.default_daily_hours ?? 5.0;
+  };
+
+  const isOffDay = (dateStr: string): boolean => {
+    const setting = getDailySettingForDate(dateStr);
+    if (setting?.is_off_day) return true;
+    return plan?.day_events?.some((ev) => ev.date === dateStr && ev.is_off_day) ?? false;
+  };
+
+  const parseDurationToHours = (display: string | undefined): number => {
+    if (!display) return 0;
+    if (display.endsWith("h")) return parseFloat(display) || 0;
+    if (display.includes("分")) {
+      const mins = parseInt(display) || 0;
+      return mins / 60;
+    }
+    return parseFloat(display) || 0;
+  };
+
+  const getUsedHours = (dateStr: string): number => {
+    const entries = getEntriesForDate(dateStr);
+    return entries.reduce((sum, e) => sum + parseDurationToHours(e.duration_display), 0);
+  };
+
+  const getRemainingHours = (dateStr: string): number => {
+    return getDailyBudget(dateStr) - getUsedHours(dateStr);
+  };
+
+  const updateDailySetting = async (dateStr: string, studyHours: number | null, offDay: boolean) => {
+    if (!planId) return;
+    await api.put(`/api/plans/${planId}/daily-settings/${dateStr}`, {
+      date: dateStr,
+      study_hours: studyHours,
+      is_off_day: offDay,
+    });
+    loadPlan();
+  };
+
+  const toggleOffDay = async (dateStr: string) => {
+    const currentOff = isOffDay(dateStr);
+    const currentBudget = getDailySettingForDate(dateStr)?.study_hours ?? null;
+    await updateDailySetting(dateStr, currentBudget, !currentOff);
+    showToast(currentOff ? "勉強日に変更" : "休日に設定");
+  };
+
+  const saveBudget = async (dateStr: string) => {
+    const hours = parseFloat(budgetValue);
+    if (isNaN(hours) || hours < 0) return;
+    const currentOff = isOffDay(dateStr);
+    await updateDailySetting(dateStr, hours, currentOff);
+    setEditingBudget(null);
+    showToast("勉強時間を更新");
   };
 
   const getDatesGroupedByWeek = (): string[][] => {
@@ -236,14 +300,18 @@ export default function PlanDetailPage() {
                   const d = new Date(dateStr + "T00:00:00");
                   const entries = getEntriesForDate(dateStr);
                   const isWeekend = di >= 5;
+                  const offDay = isOffDay(dateStr);
+                  const budget = getDailyBudget(dateStr);
+                  const remaining = getRemainingHours(dateStr);
 
                   return (
                     <td
                       key={di}
                       className="schedule-day-cell"
                       style={{
-                        background: isWeekend ? "#f0f7ff" : "white",
+                        background: offDay ? "#fef2f2" : isWeekend ? "#f0f7ff" : "white",
                         verticalAlign: "top",
+                        opacity: offDay ? 0.7 : 1,
                       }}
                     >
                       <div className="day-date">
@@ -256,7 +324,88 @@ export default function PlanDetailPage() {
                         >
                           {copiedDay === dateStr ? "済" : "コピー"}
                         </button>
+                        <button
+                          className={`btn btn-sm ${offDay ? "btn-danger" : "btn-outline"}`}
+                          onClick={() => toggleOffDay(dateStr)}
+                          style={{ marginLeft: "0.2rem", fontSize: "0.6rem", padding: "0 0.2rem" }}
+                          title={offDay ? "勉強日に戻す" : "休日にする"}
+                        >
+                          {offDay ? "休" : "休日"}
+                        </button>
                       </div>
+
+                      {!offDay && (
+                        <div
+                          className="day-budget"
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            fontSize: "0.65rem",
+                            padding: "0.15rem 0.3rem",
+                            background: remaining < 0 ? "#fef2f2" : remaining === 0 ? "#f0fdf4" : "#eff6ff",
+                            borderRadius: "4px",
+                            marginBottom: "0.3rem",
+                            gap: "0.2rem",
+                          }}
+                        >
+                          {editingBudget === dateStr ? (
+                            <div style={{ display: "flex", gap: "0.2rem", width: "100%" }}>
+                              <input
+                                type="number"
+                                value={budgetValue}
+                                onChange={(e) => setBudgetValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") saveBudget(dateStr);
+                                  if (e.key === "Escape") setEditingBudget(null);
+                                }}
+                                style={{ width: "3rem", fontSize: "0.65rem", padding: "0.1rem" }}
+                                step="0.5"
+                                min="0"
+                                autoFocus
+                              />
+                              <button
+                                className="btn btn-primary btn-sm"
+                                onClick={() => saveBudget(dateStr)}
+                                style={{ fontSize: "0.55rem", padding: "0 0.2rem" }}
+                              >
+                                OK
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <span
+                                onClick={() => {
+                                  setEditingBudget(dateStr);
+                                  setBudgetValue(String(budget));
+                                }}
+                                style={{ cursor: "pointer", textDecoration: "underline dotted" }}
+                                title="クリックで勉強時間を変更"
+                              >
+                                {budget}h
+                              </span>
+                              <span style={{
+                                fontWeight: 600,
+                                color: remaining < 0 ? "var(--danger)" : remaining === 0 ? "#16a34a" : "var(--primary)",
+                              }}>
+                                残{remaining.toFixed(1)}h
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {offDay && (
+                        <div style={{
+                          textAlign: "center",
+                          fontSize: "0.75rem",
+                          color: "var(--danger)",
+                          fontWeight: 600,
+                          padding: "0.5rem 0",
+                        }}>
+                          休日
+                        </div>
+                      )}
 
                       {entries.map((entry) => (
                         <div

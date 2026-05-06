@@ -111,14 +111,30 @@ class PlanEntryResponse(PlanEntryCreate):
         from_attributes = True
 
 
+class PlanDailySettingCreate(BaseModel):
+    date: date
+    study_hours: Optional[float] = None
+    is_off_day: bool = False
+
+
+class PlanDailySettingResponse(PlanDailySettingCreate):
+    id: UUID
+    plan_id: UUID
+
+    class Config:
+        from_attributes = True
+
+
 class PlanCreate(BaseModel):
     student_id: UUID
     name: str
     start_date: date
     end_date: date
     notes: Optional[str] = None
+    default_daily_hours: float = 5.0
     subjects: list[PlanSubjectCreate] = []
     day_events: list[PlanDayEventCreate] = []
+    daily_settings: list[PlanDailySettingCreate] = []
 
 
 class PlanResponse(BaseModel):
@@ -128,9 +144,11 @@ class PlanResponse(BaseModel):
     start_date: date
     end_date: date
     notes: Optional[str]
+    default_daily_hours: Optional[float] = 5.0
     subjects: list[PlanSubjectResponse] = []
     entries: list[PlanEntryResponse] = []
     day_events: list[PlanDayEventResponse] = []
+    daily_settings: list[PlanDailySettingResponse] = []
     student: Optional[StudentResponse] = None
 
     class Config:

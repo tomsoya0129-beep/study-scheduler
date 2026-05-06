@@ -161,6 +161,7 @@ function PlanFormModal({ students, books, onClose, onSave }: PlanFormModalProps)
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(twoWeeksLater);
   const [notes, setNotes] = useState("");
+  const [defaultDailyHours, setDefaultDailyHours] = useState(5.0);
   const [subjects, setSubjects] = useState<PlanSubject[]>([]);
   const [dayEvents, setDayEvents] = useState<PlanDayEvent[]>([]);
   const [saving, setSaving] = useState(false);
@@ -228,8 +229,10 @@ function PlanFormModal({ students, books, onClose, onSave }: PlanFormModalProps)
       start_date: startDate,
       end_date: endDate,
       notes: notes.trim() || null,
+      default_daily_hours: defaultDailyHours,
       subjects: subjects.map((s, i) => ({ ...s, sort_order: i })),
       day_events: dayEvents,
+      daily_settings: [] as { date: string; study_hours: number; is_off_day: boolean }[],
     };
     const plan = await api.post<Plan>("/api/plans", data);
     // Auto-generate schedule
@@ -288,6 +291,19 @@ function PlanFormModal({ students, books, onClose, onSave }: PlanFormModalProps)
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
             />
+          </div>
+          <div className="form-group">
+            <label>1日の勉強時間（デフォルト）</label>
+            <select
+              value={defaultDailyHours}
+              onChange={(e) => setDefaultDailyHours(parseFloat(e.target.value))}
+            >
+              {[1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 9, 10].map((h) => (
+                <option key={h} value={h}>
+                  {h}時間
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 

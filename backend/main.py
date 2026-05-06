@@ -8,12 +8,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from database import get_db
-from models import Book, BookUnit, Student, Plan, PlanSubject, PlanDayEvent, PlanEntry
+from models import Book, BookUnit, Student, Plan, PlanSubject, PlanDayEvent, PlanDailySetting, PlanEntry
 from schemas import (
     BookCreate, BookResponse, BookUnitCreate,
     StudentCreate, StudentResponse,
     PlanCreate, PlanResponse, PlanSubjectCreate,
-    PlanDayEventCreate, PlanEntryCreate, PlanEntryResponse,
+    PlanDayEventCreate, PlanDailySettingCreate, PlanDailySettingResponse,
+    PlanEntryCreate, PlanEntryResponse,
     GeneratePlanRequest,
 )
 
@@ -157,6 +158,7 @@ def create_plan(data: PlanCreate, db: Session = Depends(get_db)):
     plan = Plan(
         student_id=data.student_id, name=data.name,
         start_date=data.start_date, end_date=data.end_date, notes=data.notes,
+        default_daily_hours=data.default_daily_hours,
     )
     db.add(plan)
     db.flush()
@@ -176,6 +178,12 @@ def create_plan(data: PlanCreate, db: Session = Depends(get_db)):
             content=ev.content, is_off_day=ev.is_off_day,
         )
         db.add(event)
+    for ds in data.daily_settings:
+        setting = PlanDailySetting(
+            plan_id=plan.id, date=ds.date,
+            study_hours=ds.study_hours, is_off_day=ds.is_off_day,
+        )
+        db.add(setting)
     db.commit()
     db.refresh(plan)
     return plan
@@ -191,8 +199,10 @@ def update_plan(plan_id: uuid.UUID, data: PlanCreate, db: Session = Depends(get_
     plan.start_date = data.start_date
     plan.end_date = data.end_date
     plan.notes = data.notes
+    plan.default_daily_hours = data.default_daily_hours
     db.query(PlanSubject).filter(PlanSubject.plan_id == plan_id).delete()
     db.query(PlanDayEvent).filter(PlanDayEvent.plan_id == plan_id).delete()
+    db.query(PlanDailySetting).filter(PlanDailySetting.plan_id == plan_id).delete()
     for i, s in enumerate(data.subjects):
         subj = PlanSubject(
             plan_id=plan.id, book_id=s.book_id, display_name=s.display_name,
@@ -209,6 +219,12 @@ def update_plan(plan_id: uuid.UUID, data: PlanCreate, db: Session = Depends(get_
             content=ev.content, is_off_day=ev.is_off_day,
         )
         db.add(event)
+    for ds in data.daily_settings:
+        setting = PlanDailySetting(
+            plan_id=plan.id, date=ds.date,
+            study_hours=ds.study_hours, is_off_day=ds.is_off_day,
+        )
+        db.add(setting)
     db.commit()
     db.refresh(plan)
     return plan
@@ -245,6 +261,33 @@ def delete_plan_entry(plan_id: uuid.UUID, entry_id: uuid.UUID, db: Session = Dep
     return {"ok": True}
 
 
+# ── Daily Settings (per-day budget & off-day) ──
+
+@app.put("/api/plans/{plan_id}/daily-settings/{date_str}", response_model=PlanDailySettingResponse)
+def upsert_daily_setting(plan_id: uuid.UUID, date_str: str, data: PlanDailySettingCreate, db: Session = Depends(get_db)):
+    plan = db.query(Plan).filter(Plan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(404, "Plan not found")
+    existing = db.query(PlanDailySetting).filter(
+        PlanDailySetting.plan_id == plan_id,
+        PlanDailySetting.date == data.date,
+    ).first()
+    if existing:
+        existing.study_hours = data.study_hours
+        existing.is_off_day = data.is_off_day
+        db.commit()
+        db.refresh(existing)
+        return existing
+    setting = PlanDailySetting(
+        plan_id=plan_id, date=data.date,
+        study_hours=data.study_hours, is_off_day=data.is_off_day,
+    )
+    db.add(setting)
+    db.commit()
+    db.refresh(setting)
+    return setting
+
+
 # ── Generate Schedule ──
 
 @app.post("/api/plans/{plan_id}/generate")
@@ -256,7 +299,7 @@ def generate_plan(plan_id: uuid.UUID, db: Session = Depends(get_db)):
     # Clear existing generated entries
     db.query(PlanEntry).filter(PlanEntry.plan_id == plan_id).delete()
 
-    # Get off days and events
+    # Get off days from both day_events and daily_settings
     off_days = set()
     day_events_map: dict[date, list[str]] = {}
     for ev in plan.day_events:
@@ -264,6 +307,9 @@ def generate_plan(plan_id: uuid.UUID, db: Session = Depends(get_db)):
             off_days.add(ev.date)
         if ev.content:
             day_events_map.setdefault(ev.date, []).append(ev.content)
+    for ds in plan.daily_settings:
+        if ds.is_off_day:
+            off_days.add(ds.date)
 
     # Build date range
     current = plan.start_date

@@ -50,6 +50,14 @@ export interface PlanDayEvent {
   is_off_day: boolean;
 }
 
+export interface PlanDailySetting {
+  id?: string;
+  plan_id?: string;
+  date: string;
+  study_hours?: number;
+  is_off_day: boolean;
+}
+
 export interface PlanEntry {
   id: string;
   plan_id: string;
@@ -69,8 +77,10 @@ export interface Plan {
   start_date: string;
   end_date: string;
   notes?: string;
+  default_daily_hours?: number;
   subjects: PlanSubject[];
   entries: PlanEntry[];
   day_events: PlanDayEvent[];
+  daily_settings: PlanDailySetting[];
   student?: Student;
 }
