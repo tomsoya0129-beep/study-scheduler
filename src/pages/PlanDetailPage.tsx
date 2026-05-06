@@ -20,6 +20,11 @@ export default function PlanDetailPage() {
   const [newEntryType, setNewEntryType] = useState("test");
   const [editingBudget, setEditingBudget] = useState<string | null>(null);
   const [budgetValue, setBudgetValue] = useState("");
+  const [editingEntry, setEditingEntry] = useState<string | null>(null);
+  const [editEntryContent, setEditEntryContent] = useState("");
+  const [editEntryBookName, setEditEntryBookName] = useState("");
+  const [editEntryDuration, setEditEntryDuration] = useState("");
+  const [editEntryDetail, setEditEntryDetail] = useState("");
 
   const loadPlan = useCallback(async () => {
     if (!planId) return;
@@ -132,10 +137,11 @@ export default function PlanDetailPage() {
   };
 
   const toggleOffDay = async (dateStr: string) => {
+    if (!planId) return;
+    await api.post(`/api/plans/${planId}/toggle-off-day/${dateStr}`, {});
+    loadPlan();
     const currentOff = isOffDay(dateStr);
-    const currentBudget = getDailySettingForDate(dateStr)?.study_hours ?? null;
-    await updateDailySetting(dateStr, currentBudget, !currentOff);
-    showToast(currentOff ? "勉強日に変更" : "休日に設定");
+    showToast(currentOff ? "勉強日に変更" : "休日に設定（教科を翌日に繰り越し）");
   };
 
   const saveBudget = async (dateStr: string) => {
@@ -254,6 +260,30 @@ export default function PlanDetailPage() {
     if (!planId) return;
     await api.del(`/api/plans/${planId}/entries/${entryId}`);
     loadPlan();
+  };
+
+  const startEditEntry = (entry: PlanEntry) => {
+    setEditingEntry(entry.id);
+    setEditEntryContent(entry.content);
+    setEditEntryBookName(entry.book_name || "");
+    setEditEntryDuration(entry.duration_display || "");
+    setEditEntryDetail(entry.detail || "");
+  };
+
+  const saveEditEntry = async (entry: PlanEntry) => {
+    if (!planId || !editEntryContent.trim()) return;
+    await api.put(`/api/plans/${planId}/entries/${entry.id}`, {
+      date: entry.date,
+      entry_type: entry.entry_type,
+      book_name: editEntryBookName.trim() || null,
+      duration_display: editEntryDuration.trim() || null,
+      content: editEntryContent.trim(),
+      detail: editEntryDetail.trim() || null,
+      sort_order: entry.sort_order,
+    });
+    setEditingEntry(null);
+    loadPlan();
+    showToast("エントリを更新しました");
   };
 
   if (loading) return <div className="empty-state">読み込み中...</div>;
@@ -443,52 +473,133 @@ export default function PlanDetailPage() {
                         <div
                           key={entry.id}
                           className={`schedule-entry ${entry.entry_type}`}
-                          style={{ position: "relative" }}
+                          style={{ position: "relative", cursor: "pointer" }}
+                          onDoubleClick={() => startEditEntry(entry)}
                         >
-                          {entry.entry_type === "event" ? (
-                            <div className="entry-title">{entry.content}</div>
+                          {editingEntry === entry.id ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
+                              {entry.entry_type !== "event" && (
+                                <>
+                                  <input
+                                    value={editEntryBookName}
+                                    onChange={(e) => setEditEntryBookName(e.target.value)}
+                                    placeholder="参考書名"
+                                    style={{ fontSize: "0.7rem", padding: "0.15rem" }}
+                                  />
+                                  <input
+                                    value={editEntryDuration}
+                                    onChange={(e) => setEditEntryDuration(e.target.value)}
+                                    placeholder="時間 (例: 1.0h)"
+                                    style={{ fontSize: "0.7rem", padding: "0.15rem" }}
+                                  />
+                                </>
+                              )}
+                              <input
+                                value={editEntryContent}
+                                onChange={(e) => setEditEntryContent(e.target.value)}
+                                placeholder="内容"
+                                style={{ fontSize: "0.7rem", padding: "0.15rem" }}
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") saveEditEntry(entry);
+                                  if (e.key === "Escape") setEditingEntry(null);
+                                }}
+                              />
+                              {entry.entry_type !== "event" && (
+                                <input
+                                  value={editEntryDetail}
+                                  onChange={(e) => setEditEntryDetail(e.target.value)}
+                                  placeholder="詳細"
+                                  style={{ fontSize: "0.7rem", padding: "0.15rem" }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") saveEditEntry(entry);
+                                    if (e.key === "Escape") setEditingEntry(null);
+                                  }}
+                                />
+                              )}
+                              <div style={{ display: "flex", gap: "0.2rem" }}>
+                                <button
+                                  className="btn btn-primary btn-sm"
+                                  onClick={() => saveEditEntry(entry)}
+                                  style={{ fontSize: "0.55rem", padding: "0.1rem 0.3rem" }}
+                                >
+                                  保存
+                                </button>
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  onClick={() => setEditingEntry(null)}
+                                  style={{ fontSize: "0.55rem", padding: "0.1rem 0.3rem" }}
+                                >
+                                  取消
+                                </button>
+                              </div>
+                            </div>
                           ) : (
                             <>
-                              {entry.book_name && (
-                                <div className="entry-title">
-                                  {entry.book_name}{" "}
-                                  {entry.duration_display && (
-                                    <span style={{ fontWeight: 400 }}>
-                                      {entry.duration_display}
-                                    </span>
+                              {entry.entry_type === "event" ? (
+                                <div className="entry-title">{entry.content}</div>
+                              ) : (
+                                <>
+                                  {entry.book_name && (
+                                    <div className="entry-title">
+                                      {entry.book_name}{" "}
+                                      {entry.duration_display && (
+                                        <span style={{ fontWeight: 400 }}>
+                                          {entry.duration_display}
+                                        </span>
+                                      )}
+                                    </div>
                                   )}
-                                </div>
+                                  <div
+                                    className={
+                                      entry.entry_type === "review"
+                                        ? "entry-title"
+                                        : "entry-detail"
+                                    }
+                                  >
+                                    {entry.content}
+                                  </div>
+                                  {entry.detail && (
+                                    <div className="entry-detail">{entry.detail}</div>
+                                  )}
+                                </>
                               )}
-                              <div
-                                className={
-                                  entry.entry_type === "review"
-                                    ? "entry-title"
-                                    : "entry-detail"
-                                }
-                              >
-                                {entry.content}
+                              <div style={{
+                                position: "absolute",
+                                top: 0,
+                                right: 0,
+                                display: "flex",
+                                gap: "0.1rem",
+                              }}>
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  onClick={(e) => { e.stopPropagation(); startEditEntry(entry); }}
+                                  style={{
+                                    fontSize: "0.55rem",
+                                    padding: "0 0.15rem",
+                                    opacity: 0.5,
+                                    lineHeight: 1,
+                                  }}
+                                  title="編集"
+                                >
+                                  ✎
+                                </button>
+                                <button
+                                  className="btn btn-danger btn-sm"
+                                  onClick={() => deleteEntry(entry.id)}
+                                  style={{
+                                    fontSize: "0.6rem",
+                                    padding: "0 0.2rem",
+                                    opacity: 0.5,
+                                    lineHeight: 1,
+                                  }}
+                                  title="削除"
+                                >
+                                  ×
+                                </button>
                               </div>
-                              {entry.detail && (
-                                <div className="entry-detail">{entry.detail}</div>
-                              )}
                             </>
                           )}
-                          <button
-                            className="btn btn-danger btn-sm"
-                            onClick={() => deleteEntry(entry.id)}
-                            style={{
-                              position: "absolute",
-                              top: 0,
-                              right: 0,
-                              fontSize: "0.6rem",
-                              padding: "0 0.2rem",
-                              opacity: 0.5,
-                              lineHeight: 1,
-                            }}
-                            title="削除"
-                          >
-                            ×
-                          </button>
                         </div>
                       ))}
 

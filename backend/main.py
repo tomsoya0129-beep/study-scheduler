@@ -274,6 +274,23 @@ def add_plan_entry(plan_id: uuid.UUID, data: PlanEntryCreate, db: Session = Depe
     return entry
 
 
+@app.put("/api/plans/{plan_id}/entries/{entry_id}", response_model=PlanEntryResponse)
+def update_plan_entry(plan_id: uuid.UUID, entry_id: uuid.UUID, data: PlanEntryCreate, db: Session = Depends(get_db)):
+    entry = db.query(PlanEntry).filter(PlanEntry.id == entry_id, PlanEntry.plan_id == plan_id).first()
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    entry.date = data.date
+    entry.entry_type = data.entry_type
+    entry.book_name = data.book_name
+    entry.duration_display = data.duration_display
+    entry.content = data.content
+    entry.detail = data.detail
+    entry.sort_order = data.sort_order
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
 @app.delete("/api/plans/{plan_id}/entries/{entry_id}")
 def delete_plan_entry(plan_id: uuid.UUID, entry_id: uuid.UUID, db: Session = Depends(get_db)):
     entry = db.query(PlanEntry).filter(PlanEntry.id == entry_id, PlanEntry.plan_id == plan_id).first()
@@ -282,6 +299,88 @@ def delete_plan_entry(plan_id: uuid.UUID, entry_id: uuid.UUID, db: Session = Dep
     db.delete(entry)
     db.commit()
     return {"ok": True}
+
+
+# ── Toggle Off-Day with Entry Shifting ──
+
+@app.post("/api/plans/{plan_id}/toggle-off-day/{date_str}")
+def toggle_off_day_with_shift(plan_id: uuid.UUID, date_str: str, db: Session = Depends(get_db)):
+    plan = db.query(Plan).filter(Plan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(404, "Plan not found")
+
+    target_date = date.fromisoformat(date_str)
+
+    # Check current off-day status
+    setting = db.query(PlanDailySetting).filter(
+        PlanDailySetting.plan_id == plan_id,
+        PlanDailySetting.date == target_date,
+    ).first()
+
+    currently_off = False
+    if setting and setting.is_off_day:
+        currently_off = True
+
+    if not currently_off:
+        # Setting to off: shift entries to next available day
+        entries = db.query(PlanEntry).filter(
+            PlanEntry.plan_id == plan_id,
+            PlanEntry.date == target_date,
+            PlanEntry.entry_type != "event",
+        ).all()
+
+        if entries:
+            # Collect all off days
+            off_dates = set()
+            for ds in plan.daily_settings:
+                if ds.is_off_day:
+                    off_dates.add(ds.date)
+            for ev in plan.day_events:
+                if ev.is_off_day:
+                    off_dates.add(ev.date)
+
+            weekday_off_flags = [
+                plan.mon_off or False, plan.tue_off or False, plan.wed_off or False,
+                plan.thu_off or False, plan.fri_off or False,
+                plan.sat_off or False, plan.sun_off or False,
+            ]
+
+            # Find next available day
+            next_day = target_date + timedelta(days=1)
+            while next_day <= plan.end_date:
+                if next_day not in off_dates and not weekday_off_flags[next_day.weekday()]:
+                    break
+                next_day += timedelta(days=1)
+
+            if next_day <= plan.end_date:
+                # Get max sort_order on target day
+                existing_on_next = db.query(PlanEntry).filter(
+                    PlanEntry.plan_id == plan_id,
+                    PlanEntry.date == next_day,
+                ).all()
+                max_sort = max((e.sort_order for e in existing_on_next), default=-1)
+
+                for i, entry in enumerate(entries):
+                    entry.date = next_day
+                    entry.sort_order = max_sort + 1 + i
+
+        # Toggle on
+        if setting:
+            setting.is_off_day = True
+        else:
+            setting = PlanDailySetting(
+                plan_id=plan_id, date=target_date,
+                study_hours=None, is_off_day=True,
+            )
+            db.add(setting)
+    else:
+        # Toggle off
+        if setting:
+            setting.is_off_day = False
+
+    db.commit()
+    db.refresh(plan)
+    return plan
 
 
 # ── Daily Settings (per-day budget & off-day) ──
